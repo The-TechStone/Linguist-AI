@@ -1,0 +1,10 @@
+{
+  "name": "Linguist AI",
+  "description": "Improve your language skills with a real-time AI conversational partner. Practice speaking, listening, and get instant feedback on your grammar and pronunciation.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
