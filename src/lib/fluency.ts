@@ -13,90 +13,34 @@ function getYesterdayDateStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const DEFAULT_METRICS: FluencyMetrics = {
-  currentStreakDays: 1,
-  longestStreakDays: 1,
-  lastActiveDate: getTodayDateStr(),
-  activeDates: [getTodayDateStr()],
-  totalMessagesSent: 4,
-  totalWordsLearned: 12,
-  grammarChecksCount: 3,
-  grammarCorrectCount: 3,
-  accuracyRate: 100,
-  savedVocabulary: [
-    {
-      id: 'vocab-init-1',
-      word: 'नमस्ते',
-      lemma: 'नमस्ते',
-      transliteration: 'Namaste',
-      translation: 'Hello / Greetings / I bow to you',
-      languageCode: 'hi',
-      languageName: 'Hindi',
-      partOfSpeech: 'Interjection / Greeting',
-      contextSentence: 'नमस्ते! भाषा कक्षा में आपका स्वागत है।',
-      savedAt: Date.now() - 3600000,
-      mastered: true
-    },
-    {
-      id: 'vocab-init-2',
-      word: 'धन्यवाद',
-      lemma: 'धन्यवाद',
-      transliteration: 'Dhanyavaad',
-      translation: 'Thank you',
-      languageCode: 'hi',
-      languageName: 'Hindi',
-      partOfSpeech: 'Noun / Expression',
-      contextSentence: 'बहुत-बहुत धन्यवाद!',
-      savedAt: Date.now() - 1800000,
-      mastered: false
-    }
-  ],
-  personaUsageCount: {
-    formal_teacher: 3,
-    casual_friend: 1
-  },
-  dailyActivity: {
-    [getTodayDateStr()]: {
-      date: getTodayDateStr(),
-      messagesSent: 4,
-      wordsLearned: 12
-    }
-  }
-};
+export function createEmptyFluencyMetrics(): FluencyMetrics {
+  return {
+    currentStreakDays: 0,
+    longestStreakDays: 0,
+    lastActiveDate: '',
+    activeDates: [],
+    totalMessagesSent: 0,
+    totalWordsLearned: 0,
+    grammarChecksCount: 0,
+    grammarCorrectCount: 0,
+    accuracyRate: 0,
+    savedVocabulary: [],
+    personaUsageCount: {},
+    dailyActivity: {}
+  };
+}
 
 export function loadFluencyMetrics(): FluencyMetrics {
   try {
-    const raw = localStorage.getItem(FLUENCY_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.currentStreakDays === 'number') {
-        return {
-          ...DEFAULT_METRICS,
-          ...parsed,
-          longestStreakDays: typeof parsed.longestStreakDays === 'number'
-            ? Math.max(parsed.longestStreakDays, parsed.currentStreakDays)
-            : Math.max(1, parsed.currentStreakDays),
-          activeDates: Array.isArray(parsed.activeDates) ? parsed.activeDates : [getTodayDateStr()],
-          savedVocabulary: Array.isArray(parsed.savedVocabulary) ? parsed.savedVocabulary : [],
-          personaUsageCount: parsed.personaUsageCount || {},
-          dailyActivity: parsed.dailyActivity && typeof parsed.dailyActivity === 'object' ? parsed.dailyActivity : {}
-        };
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to parse fluency metrics from localStorage:', e);
-  }
-
-  saveFluencyMetrics(DEFAULT_METRICS);
-  return { ...DEFAULT_METRICS };
+    // Clear any legacy local guest metrics so Guest Mode never retains streaks or progress
+    localStorage.removeItem(FLUENCY_STORAGE_KEY);
+  } catch (_) {}
+  return createEmptyFluencyMetrics();
 }
 
-export function saveFluencyMetrics(metrics: FluencyMetrics) {
-  try {
-    localStorage.setItem(FLUENCY_STORAGE_KEY, JSON.stringify(metrics));
-  } catch (e) {
-    console.warn('Failed to save fluency metrics:', e);
-  }
+export function saveFluencyMetrics(_metrics: FluencyMetrics) {
+  // Streaks and fluency metrics are only persisted to Firebase Cloud when signed in.
+  // Guest mode does not save any streaks or metrics.
 }
 
 export function recordMessageActivity(metrics: FluencyMetrics, personaId: string, wordCount: number) {
@@ -105,17 +49,19 @@ export function recordMessageActivity(metrics: FluencyMetrics, personaId: string
 
   // Streak logic
   if (metrics.lastActiveDate === today) {
-    // Already active today
+    if (metrics.currentStreakDays === 0) {
+      metrics.currentStreakDays = 1;
+    }
   } else if (metrics.lastActiveDate === yesterday) {
     metrics.currentStreakDays += 1;
     metrics.lastActiveDate = today;
   } else {
-    // Break in streak
+    // First activity or break in streak
     metrics.currentStreakDays = 1;
     metrics.lastActiveDate = today;
   }
 
-  metrics.longestStreakDays = Math.max(metrics.longestStreakDays || 1, metrics.currentStreakDays);
+  metrics.longestStreakDays = Math.max(metrics.longestStreakDays || 0, metrics.currentStreakDays);
 
   if (!metrics.activeDates.includes(today)) {
     metrics.activeDates.push(today);
@@ -134,8 +80,6 @@ export function recordMessageActivity(metrics: FluencyMetrics, personaId: string
   // Persona usage
   metrics.personaUsageCount = metrics.personaUsageCount || {};
   metrics.personaUsageCount[personaId] = (metrics.personaUsageCount[personaId] || 0) + 1;
-
-  saveFluencyMetrics(metrics);
 }
 
 export function recordGrammarAccuracy(metrics: FluencyMetrics, isCorrect: boolean) {
@@ -144,7 +88,6 @@ export function recordGrammarAccuracy(metrics: FluencyMetrics, isCorrect: boolea
     metrics.grammarCorrectCount = (metrics.grammarCorrectCount || 0) + 1;
   }
   metrics.accuracyRate = Math.round((metrics.grammarCorrectCount / metrics.grammarChecksCount) * 100);
-  saveFluencyMetrics(metrics);
 }
 
 export function saveVocabularyWord(
@@ -183,20 +126,17 @@ export function saveVocabularyWord(
   };
 
   metrics.savedVocabulary.unshift(newItem);
-  saveFluencyMetrics(metrics);
   return { added: true, item: newItem };
 }
 
 export function removeVocabularyWord(metrics: FluencyMetrics, id: string) {
   metrics.savedVocabulary = metrics.savedVocabulary.filter(v => v.id !== id);
-  saveFluencyMetrics(metrics);
 }
 
 export function toggleVocabularyMastered(metrics: FluencyMetrics, id: string) {
   const item = metrics.savedVocabulary.find(v => v.id === id);
   if (item) {
     item.mastered = !item.mastered;
-    saveFluencyMetrics(metrics);
   }
 }
 

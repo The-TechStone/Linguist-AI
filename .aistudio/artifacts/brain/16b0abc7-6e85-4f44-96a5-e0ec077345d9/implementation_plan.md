@@ -1,133 +1,123 @@
-# Home Screen Dashboard, Radial Progress Gauge, Settings & Google Sign-In
+# Multi-Device Responsive Architecture — Mobile, Tablet & Desktop Adaptation
 
-Create an immersive, default Home Screen for Linguist AI featuring a live Fluency Dashboard, an interactive radial multi-ring progress gauge (streaks, vocabulary, and grammar accuracy), Persona quick-launch cards, a full Appearance and Voice Settings panel (Dark/Light mode, voice engine), and Firebase Google Sign-in to sync and isolate progress across different user accounts.
+Adapt **Linguist AI** into a multi-device experience that scales across compact smartphones (`320px–430px`), portrait and landscape tablets (`768px–1024px`), and widescreen desktops (`1280px–1440px+`), preserving the **Futuristic Glassmorphic Lounge** aesthetic (`#0052FF` Cobalt Blue & `#FF4D4D` Electric Coral on Crisp Snow and Midnight Navy surfaces).
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following decisions were confirmed through interactive clarification and define the core user experience:
+> The following architectural and UX decisions incorporate your confirmed preferences from our design interview:
 
-- **Home Navigation**: A dedicated "Start Learning" / "Continue Practice" hero CTA on the Home screen that launches directly into interactive practice, paired with clean top-bar navigation tabs (`Home` and `Practice`) for zero-friction movement between dashboard overview and active conversation.
-- **Progress Graph**: Radial multi-ring progress gauge with 3 concentric arcs measuring:
-  1. *Streak Progress* (days active toward weekly streak goal)
-  2. *Vocabulary Mastery* (words mastered in the user's personal bank)
-  3. *Grammar Accuracy* (percentage of error-free phrasings)
-- **Authentication & Accounts**: Google Sign-in with Firebase Auth + Firestore. Each account receives isolated cloud storage for history, streaks, fluency analytics, and custom settings (`users/{userId}/...`), with guest mode supported for zero-barrier trial.
+- **Confirmed Decision 1 — Floating Quick-Switch Action Bar Across All Devices**: A frosted glassmorphic floating action dock anchored at the bottom of the viewport across mobile, tablet, and desktop screens provides one-tap switching between **Home**, **Learn**, **Practice**, **Saved**, and **Settings** while keeping top-bar chrome minimal.
+- **Confirmed Decision 2 — Responsive Bottom-Sheet Drawers on Mobile/Tablet & Centered Modals on Desktop**: Settings panels, word-lookup inspection cards, custom scenario builders, and icon customization dialogs automatically adapt into touch-friendly slide-up bottom sheets (`rounded-t-2xl` with grab handle and backdrop blur) on mobile and tablet viewports (`< 1024px`), while rendering as sharp studio modals on desktop (`>= 1024px`).
+- **Confirmed Decision 3 — Collapsible Compact Language/Persona Bar & Sticky Keyboard-Safe Input Dock**: In the **Learn / Chat** view, active language, voice gender, and AI persona controls condense into an expandable compact studio strip at the top of the conversation, paired with a sticky keyboard-safe bottom input composer (`100dvh` + `env(safe-area-inset-bottom)`).
+- **Recommended Default — Installable PWA & Viewport Ergonomics**: Configure dynamic viewport height (`100dvh`), notch/home-indicator safe-area padding, and minimum `44px × 44px` touch hitboxes so the web app behaves like a native application when opened on mobile browsers or installed to a phone/tablet home screen.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Delivers**: 
-  - **Comprehensive Home Screen**: The default landing experience displaying streak milestones, radial progress metrics, recently active chat sessions, and AI Persona quick-launch cards.
-  - **Radial Multi-Ring Progress Gauge**: A high-impact, animated SVG dashboard visualizer displaying concentric rings for Streaks, Vocabulary, and Grammar, accompanied by tabular milestone breakdowns.
-  - **Comprehensive Settings Hub (Gear Icon)**: Accessible from the Home screen and top bar, allowing users to toggle Dark/Light mode, configure speech synthesis voices and speech rates, and select default learning difficulties.
-  - **Google Account Authentication**: One-click Google Sign-In powered by Firebase Authentication and Firestore to save history, streaks, and progress metrics securely across devices and account switches.
-- **Target Audience**: Dedicated language learners who require persistent progress tracking, customizable app ergonomics (dark mode & TTS voice tuning), and seamless access across multiple accounts.
+- **What It Does**: Transforms every view of Linguist AI—Home Dashboard, Learn/Chat Studio, Practice Hub (Flashcards, Grammar Quiz, Pronunciation Coach), and Saved Vocabulary Bank—to dynamically reflow and adapt its navigation, overlays, typography, and interactive controls to any screen size or input modality (touch vs. mouse/keyboard).
+- **Target Audience / Persona**: Language learners practicing on the go with one-handed smartphone thumb navigation, tablet users studying in split-screen or portrait/landscape modes, and desktop power users.
+- **Key Value**: Eliminates horizontal overflow, cramped multi-column grids, clipped popovers, and virtual-keyboard overlap on mobile and tablet devices while maintaining full 1440px studio presence on desktop monitors.
 
 ---
 
 ## 2. User Experience & Visual Design
 
-### Key User Flows
+### Key User Flows Across Screen Sizes
 
-1. **Initial Arrival & Home Screen Experience**:
-   - The user opens the app and immediately lands on the **Home Dashboard**.
-   - Top Header shows the brand lockup (3D soundwave icon), quick navigation tabs (`Home`, `Practice`), a Settings Gear icon, and the User Profile / Google Sign-in button.
-   - The Hero section displays a personalized greeting (`Welcome back!` or `Start your linguistic journey`), active streak count with flame glow, and a prominent **"Start Learning Now →"** CTA button.
-2. **Radial Multi-Ring Gauge & Fluency Metrics**:
-   - Positioned prominently on the Home screen, the radial gauge features 3 smooth glowing arcs:
-     - Outer Emerald Arc: Active Streak (e.g. 5/7 Days)
-     - Middle Indigo Arc: Vocabulary Mastered (e.g. 18/25 Words)
-     - Inner Amber Arc: Grammar Accuracy (e.g. 92% Accurate)
-   - Center displays overall CEFR Fluency level (e.g., `A2 Elementary` or `B1 Intermediate`) with animated fill on load.
-3. **Persona Quick-Launch Showcase**:
-   - A curated grid of AI Personas (*Language Buddy*, *Formal Teacher*, *Street Smart Local*, *Cultural Polyglot*, etc.) with quick-action chips to launch practice immediately in any chosen language.
-4. **Appearance & Voice Settings (Gear Icon)**:
-   - Opens a dedicated Settings modal or view:
-     - **Appearance**: Light Mode, Dark Mode, or System Auto (applies `.dark` class with tailored Tailwind neutral palettes).
-     - **Audio & Voices**: Target language voice selector (lists available Web Speech API voices matching target locale), speech rate slider (0.5x to 1.5x), pitch adjustment, and auto-speak toggle.
-     - **Account Status**: Displays Google account email, sync status, and Sign-out button.
-5. **Google Sign-In & Multi-Account Cloud Sync**:
-   - Clicking "Sign in with Google" triggers a secure popup.
-   - Upon authentication, existing local guest progress and sessions are merged with the user's cloud record, and real-time Firestore listeners keep history and streaks synchronized.
-   - Switching accounts immediately reloads the corresponding user's isolated records.
+1. **Universal Floating Quick-Switch Action Bar**:
+   - Positioned at the bottom of the screen (`fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-40`), this frosted glassmorphic dock houses primary destinations (**Home**, **Learn**, **Practice**, **Saved**) plus quick-access **Settings** and **History** triggers.
+   - Respects the **15% Mobile Sticky Cap** by pairing with a streamlined single-row top bar that displays brand identity, streak/account status, and contextual chat controls without multi-row wrapping.
+2. **Learn / Chat View with Collapsible Context Strip & Keyboard-Safe Composer**:
+   - **Top Collapsible Context Bar**: On mobile and tablet screens, the active target language, persona badge, voice gender toggle, and speed selector collapse into a compact 1-line summary bar (`[Flag] Language · Persona · [Expand ▾]`). Tapping expands a clean dropdown drawer to switch languages, personas, or voice preferences without leaving the chat.
+   - **Adaptive Message Bubbles & Inline Word Lookup**: Message frames scale cleanly from `92%` max-width on mobile (`375px`) to `80%` on tablet and `72%` on desktop. Tapping any target-language word on mobile/tablet opens a **Bottom-Sheet Word Lookup Drawer** pinned to the bottom of the screen instead of a floating hover card that could clip off-screen.
+   - **Sticky Keyboard-Safe Composer**: Anchored above the floating navigation bar (or docked cleanly with safe-area insets when the virtual keyboard is open), featuring `44px × 44px` touch hitboxes for the microphone button, scenario trigger, and send button.
+3. **Responsive Home Dashboard & Radial Progress Gauge**:
+   - **Mobile (`< 640px`)**: Single-column vertical flow with a responsive SVG Radial Multi-Ring Progress Gauge, 2×2 compact KPI grid, horizontal swipeable language category pills, and full-width touch-friendly persona cards.
+   - **Tablet (`640px – 1023px`)**: Balanced 2-column grid pairing the Radial Multi-Ring Gauge with the 7-Day Activity Matrix, and 2-column Language & Persona selection grids.
+   - **Desktop (`>= 1024px`)**: Full 12-column bento studio layout (`max-w-7xl`).
+4. **Practice Hub & Saved Vocabulary Bank on Touchscreens**:
+   - Flashcard 3D flip cards scale height fluidly (`min-h-[240px] sm:min-h-[300px]`) with large thumb-zone assessment buttons (**Still Learning** / **Mastered**).
+   - Grammar Quiz options and Pronunciation Coach microphone controls feature full-width tap rows (`min-h-[48px]`) on phones and structured grid cards on tablets/desktops.
 
-### Visual Identity & Theme (Light & Dark Mode)
-- **Light Theme**: Dominant warm clean canvas (`#FDFCFB`), structural white cards with hairline borders (`#E5E7EB`), royal indigo primary accents (`#4F46E5`), and emerald streak badges (`#059669`).
-- **Dark Theme**: Deep obsidian slate canvas (`#0B0F19`), structural dark navy cards (`#111827`), glowing violet/cyan accents (`#6366F1`, `#38BDF8`), and high-contrast WCAG AA text hierarchy.
-- **Spatial Math**: Clean 1440px desktop baseline with responsive 1-column mobile stack, generous container padding ($\ge 24\text{px}$), and nested radius coherence ($r_{\text{inner}} = r_{\text{outer}} - \text{padding}$).
+### Visual Identity & Theme
+
+- **Aesthetic Direction**: **Futuristic Glassmorphic Lounge** with responsive spatial ergonomics—combining crisp architectural hairlines (`1px solid`), deep atmospheric lighting, and tactile touch affordances.
+- **Color Palette & Mood**:
+  - **Light Mode (Crisp Snow)**: `--bg-canvas: #F4F7FB`, `--bg-glass: rgba(255, 255, 255, 0.84)`, `--primary: #0052FF` (Cobalt Blue), `--accent: #FF4D4D` (Electric Coral), `--secondary: #00B8D9` (Electric Cyan).
+  - **Dark Mode (Midnight Navy)**: `--bg-canvas: #050A18`, `--bg-glass: rgba(11, 21, 40, 0.84)`, `--primary: #0052FF` / `#3B82F6`, `--accent: #FF4D4D`.
+- **Typography & Fluid Scaling**:
+  - **Display (`Space Grotesk`)**: Fluid hero and section headings using `clamp(1.5rem, 3.5vw, 2.5rem)` and `text-wrap: balance`.
+  - **Body (`Plus Jakarta Sans` + Multi-Script Noto Fonts)**: `15px–16px` base size on mobile inputs (`text-base` to prevent iOS Safari auto-zoom on focus) and comfortable reading measure across all viewports.
+  - **Telemetry (`JetBrains Mono`)**: `tabular-nums` for streak counters, CEFR estimates, and radial percentages.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: View State Navigation Model (`view: 'home' | 'chat'`)**
-  - *Chosen Approach*: Maintain a top-level view router in app state (`state.activeView = 'home' | 'chat'`). The Home screen serves as the launchpad with a prominent "Start Learning" CTA, while the chat view retains all real-time features with a "Back to Home" button and header tab.
-  - *Why*: Provides immediate access to overview metrics without burying the conversational learning environment.
-  - *Alternatives Considered*: A modal overlay for the dashboard (too cramped for full metrics) or completely separate URL routes (unnecessary overhead for an instant-response SPA).
-
-- **Decision 2: Dual Persistence Strategy (Firestore + LocalStorage)**
-  - *Chosen Approach*: When unauthenticated (Guest), all sessions and metrics persist in `localStorage`. Once signed in with Google, data syncs to Firestore under `users/{uid}`, ensuring persistent multi-account cloud backup while preserving instant offline usability.
-  - *Why*: Eliminates mandatory login friction for first-time visitors while fully honoring the user's requirement to save progress and streaks across distinct Google accounts.
-
-- **Decision 3: Custom SVG Radial Multi-Ring Gauge**
-  - *Chosen Approach*: Lightweight, dependency-free SVG concentric circle rendering with stroke-dashoffset math and CSS transitions.
-  - *Why*: Guarantees zero bundle bloat, responsive crispness at all DPIs, and seamless light/dark mode color transitions.
+- **Decision 1: Universal Floating Quick-Switch Action Bar**
+  - *Chosen Approach*: A centered floating glassmorphic bottom dock across mobile, tablet, and desktop that provides instant view switching and reserves generous bottom padding (`pb-28` / `pb-32`) in scrollable views so content is never obscured.
+  - *Why*: Gives mobile and tablet users effortless one-handed thumb navigation while giving desktop users a cohesive, futuristic command dock.
+  - *Alternatives Considered*: Hiding navigation behind a mobile hamburger drawer, which adds extra taps to switch between Chat, Practice, and Saved words.
+- **Decision 2: Hybrid Bottom-Sheet Drawers (`< 1024px`) vs. Centered Studio Modals (`>= 1024px`)**
+  - *Chosen Approach*: Use CSS media queries and touch-friendly sheet anatomy (top grab handle, `max-h-[85dvh]` internal scroll, backdrop tap-to-dismiss, and swipe-down gesture support) for Settings, Word Lookup, Custom Scenario, and Icon Customization on mobile/tablet, transitioning to centered modals on desktop.
+  - *Why*: Hover-based popovers and centered modals are hard to reach and can clip when virtual keyboards appear on mobile/tablet screens; bottom sheets keep actions in the natural thumb zone.
+- **Decision 3: Collapsible Language/Persona Header in Chat View**
+  - *Chosen Approach*: Condense the language picker, persona selector, and voice controls into a single compact expandable bar at the top of the chat view on mobile and tablet devices.
+  - *Why*: Preserves maximum vertical screen real estate (over 85% of the viewport) for conversation messages and the sticky input composer.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+### Architecture & Responsive Component Diagram
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   App State Store                      │
-│   (activeView, user, theme, sessions, fluencyMetrics)  │
-└───────────┬────────────────────────────────┬───────────┘
-            │                                │
-            ▼                                ▼
-┌───────────────────────┐        ┌───────────────────────┐
-│     Home Screen       │        │   Chat Practice View  │
-│  - Hero "Start Learn" │        │  - Gemini AI Partner  │
-│  - Radial Multi-Ring  │        │  - Tokenized Words    │
-│  - Streak Analytics   │        │  - Grammar Breakdown  │
-│  - Persona Grid       │        │  - Audio Pronounce    │
-│  - Settings Modal     │        │  - Dynamic Suggestion │
-└───────────┬───────────┘        └───────────┬───────────┘
-            │                                │
-            └────────────────┬───────────────┘
-                             ▼
-┌────────────────────────────────────────────────────────┐
-│         Authentication & Persistence Layer             │
-├────────────────────────────┬───────────────────────────┤
-│  Firebase Auth (Google)    │  Firestore Database       │
-│  - signInWithPopup()       │  - users/{uid}/profile    │
-│  - onAuthStateChanged()    │  - users/{uid}/sessions   │
-│  - Multi-account switch    │  - users/{uid}/vocabulary │
-└────────────────────────────┴───────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                  Viewport & Device Adaptation Layer                        │
+│   • 100dvh Dynamic Viewport Height + Safe-Area Insets (top/bottom/sides)   │
+│   • Breakpoints: Mobile (<640px) │ Tablet (640-1023px) │ Desktop (>=1024px)│
+└───────────────────┬────────────────────────────────────┬───────────────────┘
+                    │                                    │
+                    ▼                                    ▼
+┌───────────────────────────────────────┐  ┌─────────────────────────────────┐
+│     Top Studio Header (Compact)       │  │  Floating Quick-Switch Dock     │
+│ • Brand Identity & Custom Icon        │  │ • Fixed Bottom Glassmorphic Bar │
+│ • Guest / Google Account & Streak     │  │ • Home │ Learn │ Practice │Saved│
+│ • History Drawer & Quick Settings     │  │ • Touch Hitboxes >= 44x44px     │
+└───────────────────┬───────────────────┘  └─────────────────┬───────────────┘
+                    │                                        │
+                    ▼                                        ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     Adaptive View Containers                               │
+├────────────────────────┬─────────────────────────┬─────────────────────────┤
+│   Home Dashboard       │   Learn / Chat Studio   │  Practice & Vocab Views │
+│ • Fluid Hero & Radial  │ • Collapsible Compact   │ • Responsive 3D Flip    │
+│   Multi-Ring Gauge     │   Language/Persona Bar  │   Flashcards            │
+│ • 1-col -> 2-col ->    │ • Adaptive Chat Frames  │ • Touch-Friendly Quiz & │
+│   12-col Bento Grid    │ • Sticky Keyboard-Safe  │   Pronunciation Cards   │
+│ • Touch Scroll Filters │   Composer Dock         │ • Responsive Filter Bar │
+└────────────────────────┴───────────┬─────────────┴─────────────────────────┘
+                                     │
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│            Responsive Overlay & Sheet Engine (<1024px vs >=1024px)         │
+│ • Word Lookup Card: Floating Popover (Desktop) <-> Bottom Sheet (Mobile)   │
+│ • App Settings, Custom Scenario & Icon Studio: Centered <-> Bottom Sheet   │
+│ • Touch Swipe-Down Dismissal & Keyboard-Safe Scrollable Sheet Bodies       │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Database Schema (Firestore)
-- **`users/{userId}`**:
-  - `displayName`: string
-  - `email`: string
-  - `photoURL`: string
-  - `currentStreak`: number
-  - `lastActiveDate`: string
-  - `theme`: 'light' | 'dark' | 'system'
-  - `preferredVoice`: string
-  - `speechRate`: number
-- **`users/{userId}/sessions/{sessionId}`**:
-  - `language`: object (code, name, nativeName, flag)
-  - `persona`: object (id, name, avatar)
-  - `messages`: array of message objects with feedback
-  - `updatedAt`: timestamp
-- **`users/{userId}/vocabulary/{wordId}`**:
-  - `word`: string, `translation`: string, `mastered`: boolean, `createdAt`: timestamp
+### Data Model & Responsive UI State
 
-### Implementation Steps
-1. **Firebase Provisioning**: Initialize Firebase Auth and Firestore via AI Studio setup tools.
-2. **Theme & Settings Module**: Implement dark/light theme switching with CSS variables and Web Speech voice enumeration.
-3. **Home Screen & Radial Gauge Component**: Build the animated radial multi-ring gauge and dashboard cards.
-4. **View State Integration**: Seamlessly switch between Home and Chat with dedicated action buttons.
-5. **Auth & Cloud Sync**: Wire Google Sign-in, user profile rendering, and multi-account cloud sync.
+- **`isMobileChatConfigExpanded: boolean`**: Controls whether the compact language, persona, and voice control bar at the top of the Learn/Chat view is expanded or collapsed on mobile and tablet screens.
+- **Touch & Viewport Ergonomics**:
+  - Inputs and textareas enforce `font-size: 16px` (`text-base`) on mobile screens to prevent involuntary browser zoom on iOS/Android focus.
+  - Interactive word tokens support both desktop hover/click and mobile tap-to-open bottom sheet without clipping at viewport edges.
+
+### Interactive Component & State Mapping
+
+- **Floating Quick-Switch Dock**: Clicking/tapping **Home**, **Learn**, **Practice**, or **Saved** switches `state.activeTab` (and initializes a fresh ephemeral chat if entering **Learn** in Guest Mode), while automatically collapsing any open mobile drawers.
+- **Collapsible Chat Context Bar**: Tapping the compact summary pill in the chat header toggles `isMobileChatConfigExpanded`, revealing full-width touch selectors for Target Language, AI Persona, Voice Gender, Speaking Rate, and Auto-Speak.
+- **Bottom-Sheet Drawers (Settings / Word Lookup / Scenario / Icon)**: Support backdrop click/tap dismissal, dedicated `44px × 44px` close buttons, and touch swipe-down on the top drag handle bar to close cleanly.
