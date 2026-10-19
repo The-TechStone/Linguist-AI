@@ -1,0 +1,435 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Stores user profile, streak metrics, and appearance/voice settings.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the user."
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name of the user."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Email address of the user."
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Profile photo URL."
+        },
+        "currentStreakDays": {
+          "type": "number",
+          "description": "Current active daily learning streak."
+        },
+        "longestStreakDays": {
+          "type": "number",
+          "description": "All-time longest daily streak."
+        },
+        "lastActiveDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "YYYY-MM-DD date string of last activity."
+        },
+        "totalMessagesSent": {
+          "type": "number",
+          "description": "Total user messages sent in practice."
+        },
+        "totalCorrectionsReceived": {
+          "type": "number",
+          "description": "Total grammar corrections received."
+        },
+        "accurateMessagesCount": {
+          "type": "number",
+          "description": "Total messages marked grammatically accurate."
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark", "system"],
+          "maxLength": 20,
+          "description": "Preferred UI color theme."
+        },
+        "speechRate": {
+          "type": "number",
+          "description": "Preferred speech synthesis rate (0.5 to 1.5)."
+        },
+        "speechPitch": {
+          "type": "number",
+          "description": "Preferred speech synthesis pitch (0.5 to 1.5)."
+        },
+        "preferredVoiceURI": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Preferred browser speech synthesis voice URI."
+        },
+        "autoSpeak": {
+          "type": "boolean",
+          "description": "Whether assistant responses are spoken automatically."
+        },
+        "defaultLanguageCode": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Default target language code."
+        },
+        "defaultPersonaId": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Default AI persona identifier."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "email",
+        "photoURL",
+        "currentStreakDays",
+        "longestStreakDays",
+        "lastActiveDate",
+        "totalMessagesSent",
+        "totalCorrectionsReceived",
+        "accurateMessagesCount",
+        "theme",
+        "speechRate",
+        "speechPitch",
+        "preferredVoiceURI",
+        "autoSpeak",
+        "defaultLanguageCode",
+        "defaultPersonaId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatSessionMeta": {
+      "title": "ChatSessionMeta",
+      "description": "Metadata for a user's language conversation session.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Session identifier."
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner user UID."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Session title."
+        },
+        "languageCode": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Target language code."
+        },
+        "personaId": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Selected AI persona ID."
+        },
+        "tone": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Selected tone style."
+        },
+        "difficulty": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Selected difficulty level."
+        },
+        "lastMessagePreview": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Preview snippet of the most recent message."
+        },
+        "messageCount": {
+          "type": "number",
+          "description": "Total number of messages in this session."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Session creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Session last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "title",
+        "languageCode",
+        "personaId",
+        "tone",
+        "difficulty",
+        "lastMessagePreview",
+        "messageCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMessageDoc": {
+      "title": "ChatMessageDoc",
+      "description": "Individual message inside a user's conversation session.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Message ID."
+        },
+        "sessionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent session ID."
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner user UID."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "assistant"],
+          "maxLength": 20,
+          "description": "Sender role."
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Primary message text."
+        },
+        "transliteration": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Romanized pronunciation guide."
+        },
+        "translation": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "English translation."
+        },
+        "isCorrect": {
+          "type": "boolean",
+          "description": "Whether grammar was accurate."
+        },
+        "correction": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Corrected phrasing if applicable."
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Grammar feedback explanation."
+        },
+        "timestampMs": {
+          "type": "number",
+          "description": "Client ordering epoch timestamp in ms."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "sessionId",
+        "userId",
+        "role",
+        "content",
+        "transliteration",
+        "translation",
+        "isCorrect",
+        "correction",
+        "explanation",
+        "timestampMs",
+        "createdAt"
+      ]
+    },
+    "VocabularyDoc": {
+      "title": "VocabularyDoc",
+      "description": "Saved vocabulary word in the user's personal lexicon.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Vocabulary item ID."
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner user UID."
+        },
+        "word": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Surface word in target script."
+        },
+        "lemma": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Root dictionary form."
+        },
+        "transliteration": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Romanized pronunciation."
+        },
+        "translation": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "English meaning."
+        },
+        "languageCode": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Language code."
+        },
+        "languageName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Language display name."
+        },
+        "partOfSpeech": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Grammatical part of speech."
+        },
+        "contextSentence": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Example sentence context."
+        },
+        "mastered": {
+          "type": "boolean",
+          "description": "Whether the user has mastered this word."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "word",
+        "lemma",
+        "transliteration",
+        "translation",
+        "languageCode",
+        "languageName",
+        "partOfSpeech",
+        "contextSentence",
+        "mastered",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DailyActivityDoc": {
+      "title": "DailyActivityDoc",
+      "description": "Tracks daily message and vocabulary counts for a specific date.",
+      "type": "object",
+      "properties": {
+        "dateKey": {
+          "type": "string",
+          "maxLength": 20,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "YYYY-MM-DD date identifier."
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner user UID."
+        },
+        "messagesSent": {
+          "type": "number",
+          "description": "Messages sent on this date."
+        },
+        "wordsLearned": {
+          "type": "number",
+          "description": "Words learned on this date."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update server timestamp."
+        }
+      },
+      "required": [
+        "dateKey",
+        "userId",
+        "messagesSent",
+        "wordsLearned",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile, streaks, and appearance/voice preferences."
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSessionMeta" },
+      "description": "User conversation session metadata."
+    },
+    "/users/{userId}/sessions/{sessionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessageDoc" },
+      "description": "Messages inside a user's conversation session."
+    },
+    "/users/{userId}/vocabulary/{vocabId}": {
+      "schema": { "$ref": "#/entities/VocabularyDoc" },
+      "description": "Saved vocabulary bank items for a user."
+    },
+    "/users/{userId}/dailyActivity/{dateKey}": {
+      "schema": { "$ref": "#/entities/DailyActivityDoc" },
+      "description": "Daily practice log entries per user."
+    }
+  }
+}

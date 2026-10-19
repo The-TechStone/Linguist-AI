@@ -22,6 +22,8 @@ import {
 } from './lib/gemini';
 import {
   loadFluencyMetrics,
+  saveFluencyMetrics,
+  getTodayDateStr,
   recordMessageActivity,
   recordGrammarAccuracy,
   saveVocabularyWord,
@@ -39,6 +41,28 @@ import {
   getDynamicSuggestions,
   SuggestionItem
 } from './lib/suggestions';
+import {
+  auth,
+  signInWithGoogle,
+  signOutUser,
+  onAuthStateChanged,
+  loadOrInitUserCloudState,
+  syncUserProfileToCloud,
+  saveCloudSessionWithMessages,
+  saveCloudVocabularyItem,
+  deleteCloudVocabularyItem,
+  saveCloudDailyActivity,
+  deleteCloudSession,
+  type User,
+  type UserSettingsPreferences
+} from './lib/firebase';
+import {
+  loadLocalSettings,
+  saveLocalSettings,
+  applyThemeToDocument,
+  renderHomeScreen,
+  renderAppSettingsModal
+} from './lib/homeAndSettings';
 
 // --- State Management & Persistence ---
 const STORAGE_KEY = 'linguist_chat_sessions_v2';
@@ -95,6 +119,14 @@ interface AppState {
   showIconModal: boolean;
   deferredInstallPrompt: any;
   isAppInstalled: boolean;
+
+  // Feature 5: Home Screen Dashboard, Settings & Firebase Auth
+  activeView: 'home' | 'chat';
+  showAppSettingsModal: boolean;
+  homeLanguageCategory: LanguageCategory;
+  user: User | null;
+  isSyncingCloud: boolean;
+  userSettings: UserSettingsPreferences;
 }
 
 // Helper: load stored sessions or bootstrap initial sample session
@@ -177,13 +209,15 @@ const defaultActiveId = initialSessions.some(s => s.id === storedActiveId)
   : initialSessions[0]?.id || null;
 
 let fluencyMetrics = loadFluencyMetrics();
+const initialUserSettings = loadLocalSettings();
+applyThemeToDocument(initialUserSettings.theme);
 
 let state: AppState = {
   sessions: initialSessions,
   activeSessionId: defaultActiveId,
   userInput: '',
   isTyping: false,
-  autoSpeak: true,
+  autoSpeak: initialUserSettings.autoSpeak,
   showHistoryDrawer: false,
   showLanguageModal: false,
   showPersonaModal: false,
@@ -219,11 +253,64 @@ let state: AppState = {
   // Feature 4: Brand Icon & PWA Installation
   showIconModal: false,
   deferredInstallPrompt: null,
-  isAppInstalled: false
+  isAppInstalled: false,
+
+  // Feature 5: Home Screen Dashboard, Settings & Firebase Auth
+  activeView: 'home',
+  showAppSettingsModal: false,
+  homeLanguageCategory: 'all',
+  user: null,
+  isSyncingCloud: false,
+  userSettings: initialUserSettings
 };
 
-// Listen for PWA installation prompt
+// Listen for Firebase Google Authentication state changes
+onAuthStateChanged(auth, async (user) => {
+  state.user = user;
+  if (user) {
+    state.isSyncingCloud = true;
+    renderApp();
+    try {
+      const cloudState = await loadOrInitUserCloudState(
+        user,
+        fluencyMetrics,
+        state.userSettings,
+        state.sessions
+      );
+      fluencyMetrics = cloudState.metrics;
+      saveFluencyMetrics(fluencyMetrics);
+
+      state.userSettings = cloudState.settings;
+      state.autoSpeak = cloudState.settings.autoSpeak;
+      saveLocalSettings(state.userSettings);
+      applyThemeToDocument(state.userSettings.theme);
+
+      if (cloudState.sessions.length > 0) {
+        state.sessions = cloudState.sessions;
+        state.activeSessionId = cloudState.sessions[0].id;
+        setStoredActiveSessionId(state.activeSessionId);
+        saveSessions(state.sessions);
+      }
+    } catch (err) {
+      console.error('Error syncing cloud account data:', err);
+    } finally {
+      state.isSyncingCloud = false;
+      renderApp();
+    }
+  } else {
+    state.isSyncingCloud = false;
+    renderApp();
+  }
+});
+
+// Listen for OS theme changes when theme is set to 'system'
 if (typeof window !== 'undefined') {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (state.userSettings.theme === 'system') {
+      applyThemeToDocument('system');
+    }
+  });
+
   window.addEventListener('beforeinstallprompt', (e: Event) => {
     e.preventDefault();
     state.deferredInstallPrompt = e;
@@ -484,7 +571,11 @@ function speak(text?: string, langCode?: string, slow: boolean = false) {
     const targetLocale = BCP47_LOOKUP[langCode] || langCode;
     const langPrefix = langCode === 'sa' ? 'hi' : langCode.toLowerCase();
 
-    const voice = voices.find(v => v.lang.toLowerCase() === targetLocale.toLowerCase()) ||
+    const preferredURI = state.userSettings.preferredVoiceURI;
+    const preferredVoice = preferredURI ? voices.find(v => v.voiceURI === preferredURI) : undefined;
+
+    const voice = preferredVoice ||
+                  voices.find(v => v.lang.toLowerCase() === targetLocale.toLowerCase()) ||
                   voices.find(v => v.lang.toLowerCase().startsWith(langPrefix)) ||
                   (langCode === 'sa' ? voices.find(v => v.lang.toLowerCase().startsWith('hi')) : null);
 
@@ -492,7 +583,9 @@ function speak(text?: string, langCode?: string, slow: boolean = false) {
       utterance.voice = voice;
     }
     utterance.lang = targetLocale;
-    utterance.rate = slow ? 0.75 : 0.95;
+    const baseRate = state.userSettings.speechRate || 0.95;
+    utterance.rate = slow ? Math.max(0.5, baseRate * 0.78) : baseRate;
+    utterance.pitch = state.userSettings.speechPitch || 1.0;
     window.speechSynthesis.speak(utterance);
   } catch (e) {
     console.warn('Speech synthesis failed:', e);
@@ -500,7 +593,11 @@ function speak(text?: string, langCode?: string, slow: boolean = false) {
 }
 
 if ('speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = () => {};
+  window.speechSynthesis.onvoiceschanged = () => {
+    if (state.showAppSettingsModal) {
+      renderApp();
+    }
+  };
 }
 
 // Dynamic Suggestions rotation helper
@@ -547,8 +644,12 @@ function createNewChatSession(
   setStoredActiveSessionId(newSession.id);
   saveSessions(state.sessions);
 
+  if (state.user) {
+    saveCloudSessionWithMessages(state.user.uid, newSession).catch(err => console.warn(err));
+  }
+
   setupSpeechRecognition(lang.code);
-  if (state.autoSpeak && lang.code) {
+  if (state.autoSpeak && lang.code && state.activeView === 'chat') {
     speak(initialGreeting, lang.code);
   }
 
@@ -561,12 +662,16 @@ function switchActiveSession(sessionId: string) {
     state.activeSessionId = target.id;
     setStoredActiveSessionId(target.id);
     state.showHistoryDrawer = false;
+    state.activeView = 'chat';
     setupSpeechRecognition(target.language.code);
     renderApp();
   }
 }
 
 function deleteSession(sessionId: string) {
+  if (state.user) {
+    deleteCloudSession(state.user.uid, sessionId).catch(err => console.warn(err));
+  }
   state.sessions = state.sessions.filter(s => s.id !== sessionId);
   if (state.sessions.length === 0) {
     createNewChatSession();
@@ -654,6 +759,15 @@ async function handleSendMessage(customText?: string) {
 
   // Track fluency activity (streak & message count)
   recordMessageActivity(fluencyMetrics, currentPersona.id, textToSend.split(/\s+/).length);
+  if (state.user) {
+    const todayKey = getTodayDateStr();
+    const todayAct = fluencyMetrics.dailyActivity?.[todayKey];
+    syncUserProfileToCloud(state.user, fluencyMetrics, state.userSettings).catch(err => console.warn(err));
+    if (todayAct) {
+      saveCloudDailyActivity(state.user.uid, todayKey, todayAct.messagesSent, todayAct.wordsLearned).catch(err => console.warn(err));
+    }
+    saveCloudSessionWithMessages(state.user.uid, session).catch(err => console.warn(err));
+  }
 
   // Automatically cycle suggestions on every sent message
   state.suggestionSeed = (state.suggestionSeed + 1) % 1000;
@@ -672,6 +786,10 @@ async function handleSendMessage(customText?: string) {
         userMsg.grammarFeedback = feedback;
         recordGrammarAccuracy(fluencyMetrics, feedback.isCorrect);
         updateActiveSession(() => {});
+        if (state.user) {
+          syncUserProfileToCloud(state.user, fluencyMetrics, state.userSettings).catch(err => console.warn(err));
+          saveCloudSessionWithMessages(state.user.uid, session).catch(err => console.warn(err));
+        }
         renderApp();
       }
     })
@@ -706,6 +824,10 @@ async function handleSendMessage(customText?: string) {
     updateActiveSession(s => {
       s.messages.push(aiMsg);
     });
+
+    if (state.user) {
+      saveCloudSessionWithMessages(state.user.uid, session).catch(err => console.warn(err));
+    }
 
     // Automatically cycle suggestions on every AI reply so fresh ideas appear
     state.suggestionSeed = (state.suggestionSeed + 1) % 1000;
@@ -925,7 +1047,7 @@ function renderHoverCard() {
     speak(word, session.language.code);
   });
   popover.querySelector('#popover-bookmark-btn')?.addEventListener('click', () => {
-    saveVocabularyWord(fluencyMetrics, {
+    const saved = saveVocabularyWord(fluencyMetrics, {
       word,
       lemma: token?.lemma || word,
       transliteration: token?.transliteration || word,
@@ -935,6 +1057,9 @@ function renderHoverCard() {
       partOfSpeech: token?.partOfSpeech || 'Word',
       contextSentence: session.messages.find(m => m.id === msgId)?.content
     });
+    if (state.user && saved.added) {
+      saveCloudVocabularyItem(state.user.uid, saved.item).catch(err => console.warn(err));
+    }
     renderHoverCard();
     renderApp();
   });
@@ -1138,10 +1263,10 @@ function renderApp() {
   const cefr = computeCefrEstimate(fluencyMetrics);
 
   root.innerHTML = `
-    <div class="h-screen bg-[#FDFCFB] flex flex-col font-sans overflow-hidden text-[#2D2D2D]">
+    <div class="theme-app-bg h-screen bg-[#FDFCFB] flex flex-col font-sans overflow-hidden text-[#2D2D2D]">
       
       <!-- Top Navigation Header -->
-      <header class="border-b border-gray-100 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-2.5 flex items-center justify-between sticky top-0 z-30 shadow-xs">
+      <header class="theme-header border-b border-gray-100 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-2.5 flex items-center justify-between sticky top-0 z-30 shadow-xs">
         <div class="flex items-center gap-2 sm:gap-3 min-w-0">
           
           <!-- App Brand Lockup with 3D Soundwave Icon -->
@@ -1166,6 +1291,34 @@ function renderApp() {
             </div>
           </button>
 
+          <!-- Home / Practice Navigation Switcher -->
+          <div class="flex items-center bg-gray-100 p-1 rounded-2xl border border-gray-200/80 shrink-0">
+            <button
+              id="nav-home-btn"
+              class="px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                state.activeView === 'home'
+                  ? 'bg-indigo-600 text-white shadow-2xs'
+                  : 'text-gray-600 hover:text-gray-900'
+              }"
+              title="Open Home Dashboard, Progress Graph, Streaks & Personas"
+            >
+              <span>🏠</span>
+              <span>Home</span>
+            </button>
+            <button
+              id="nav-chat-btn"
+              class="px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                state.activeView === 'chat'
+                  ? 'bg-indigo-600 text-white shadow-2xs'
+                  : 'text-gray-600 hover:text-gray-900'
+              }"
+              title="Go to Language Practice Conversation"
+            >
+              <span>💬</span>
+              <span>Learn</span>
+            </button>
+          </div>
+
           <!-- History Drawer Toggle Button -->
           <button
             id="toggle-history-btn"
@@ -1180,46 +1333,45 @@ function renderApp() {
           </button>
 
           <!-- Active Persona, Tone & Difficulty Controls -->
-          <div class="flex items-center gap-2 sm:gap-2.5 min-w-0">
+          <div class="hidden md:flex items-center gap-2 sm:gap-2.5 min-w-0">
             <button
               id="switch-persona-btn"
-              class="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-xl shadow-2xs hover:scale-105 transition-transform cursor-pointer flex-shrink-0"
+              class="w-9 h-9 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-lg shadow-2xs hover:scale-105 transition-transform cursor-pointer flex-shrink-0"
               title="Click to select AI Persona, Tone and Difficulty"
             >
               ${persona.avatar}
             </button>
             <div class="min-w-0">
-              <div class="flex items-center gap-1.5 sm:gap-2">
-                <p class="font-bold text-xs sm:text-base text-gray-900 truncate leading-tight">
+              <div class="flex items-center gap-1.5">
+                <p class="font-bold text-xs sm:text-sm text-gray-900 truncate leading-tight">
                   ${persona.name}
                 </p>
                 <button
                   id="switch-persona-text-btn"
-                  class="text-[11px] text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg cursor-pointer font-semibold transition-colors flex items-center gap-1"
+                  class="text-[10px] text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded-lg cursor-pointer font-semibold transition-colors flex items-center gap-0.5"
                   title="Adjust AI Persona, Tone & Difficulty"
                 >
-                  <span>⚙️ Settings</span>
-                  <span class="text-[9px]">▾</span>
+                  <span>Persona</span>
+                  <span class="text-[8px]">▾</span>
                 </button>
               </div>
 
-              <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+              <div class="flex flex-wrap items-center gap-1 mt-0.5">
                 <!-- Clickable Language Switcher Button -->
                 <button
                   id="switch-lang-btn"
-                  class="text-xs font-semibold text-indigo-700 hover:text-indigo-900 flex items-center gap-1.5 bg-indigo-50/80 hover:bg-indigo-100 px-2.5 py-0.5 rounded-full border border-indigo-100 cursor-pointer transition-colors"
+                  class="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 bg-indigo-50/80 hover:bg-indigo-100 px-2 py-0.5 rounded-full border border-indigo-100 cursor-pointer transition-colors"
                   title="Switch Target Language"
                 >
                   <span>${lang.flag}</span>
                   <span class="font-bold">${lang.name}</span>
-                  <span class="text-indigo-500 font-normal hidden sm:inline">(${lang.nativeName})</span>
-                  <span class="text-[10px] ml-0.5">▾</span>
+                  <span class="text-[9px] ml-0.5">▾</span>
                 </button>
 
                 <!-- Tone Pill Button -->
                 <button
                   id="header-tone-btn"
-                  class="text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-85 transition-opacity ${getToneBadgeClass(currentTone)}"
+                  class="hidden lg:inline-block text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-85 transition-opacity ${getToneBadgeClass(currentTone)}"
                   title="Active Tone: Click to adjust"
                 >
                   ${getToneLabel(currentTone)}
@@ -1228,7 +1380,7 @@ function renderApp() {
                 <!-- Difficulty Pill Button -->
                 <button
                   id="header-diff-btn"
-                  class="text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-85 transition-opacity ${getDifficultyBadgeClass(currentDifficulty)}"
+                  class="hidden xl:inline-block text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-85 transition-opacity ${getDifficultyBadgeClass(currentDifficulty)}"
                   title="Active Difficulty: Click to adjust"
                 >
                   ${getDifficultyLabel(currentDifficulty)}
@@ -1238,28 +1390,28 @@ function renderApp() {
           </div>
         </div>
 
-        <!-- Right Header Actions (Fluency, Vocab Bank, Settings) -->
-        <div class="flex items-center gap-1 sm:gap-2">
+        <!-- Right Header Actions (Streak, Vocab, Fluency, Settings Gear, Auth) -->
+        <div class="flex items-center gap-1 sm:gap-1.5">
           
           <!-- Daily Streak Button -->
           <button
             id="header-streak-btn"
-            class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+            class="px-2.5 py-1.5 rounded-2xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
             title="Active Streak: Click to view Fluency Dashboard"
           >
             <span>🔥</span>
-            <span>${fluencyMetrics.currentStreakDays}d</span>
+            <span class="tabular-nums">${fluencyMetrics.currentStreakDays}d</span>
           </button>
 
           <!-- Vocabulary Bank Button -->
           <button
             id="header-vocab-btn"
-            class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+            class="px-2.5 py-1.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
             title="Saved Vocabulary Bank"
           >
             <span>📖</span>
-            <span class="hidden md:inline">Vocab</span>
-            <span class="px-1.5 py-0.2 bg-emerald-200/70 text-emerald-900 rounded-full text-[10px]">
+            <span class="hidden lg:inline">Vocab</span>
+            <span class="px-1.5 py-0.2 bg-emerald-200/70 text-emerald-900 rounded-full text-[10px] tabular-nums">
               ${fluencyMetrics.savedVocabulary.length}
             </span>
           </button>
@@ -1267,45 +1419,56 @@ function renderApp() {
           <!-- Fluency Dashboard Link -->
           <button
             id="header-fluency-btn"
-            class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+            class="hidden sm:flex px-2.5 py-1.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold text-xs items-center gap-1 transition-all cursor-pointer shadow-2xs"
             title="Open Fluency Analytics & Mastery Dashboard"
           >
             <span>📊</span>
-            <span class="hidden lg:inline">Fluency</span>
-            <span class="hidden sm:inline-block px-1.5 py-0.2 bg-indigo-200/70 text-indigo-900 rounded-full text-[10px]">
+            <span class="hidden xl:inline">Fluency</span>
+            <span class="px-1.5 py-0.2 bg-indigo-200/70 text-indigo-900 rounded-full text-[10px]">
               ${cefr.level}
             </span>
           </button>
 
-          <!-- Audio Auto-Speak Toggle -->
+          <!-- Settings Gear Icon (Appearance: Dark/Light Mode, Voices, Account) -->
           <button
-            id="toggle-speak-btn"
-            class="p-2 sm:p-2.5 rounded-2xl transition-all border cursor-pointer ${
-              state.autoSpeak
-                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-2xs'
-                : 'bg-gray-50 text-gray-400 border-gray-200'
-            }"
-            title="${state.autoSpeak ? 'Audio pronunciation auto-play is ON' : 'Audio pronunciation auto-play is OFF'}"
+            id="header-app-settings-btn"
+            class="p-2 rounded-2xl bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 transition-all cursor-pointer shadow-2xs flex items-center gap-1 text-xs font-bold"
+            title="Settings — Change Dark/Light Mode, Voices, and Preferences"
           >
-            ${state.autoSpeak ? '🔊' : '🔇'}
+            <span>⚙️</span>
+            <span class="hidden xl:inline">Settings</span>
           </button>
 
-          <!-- PWA Install Button (When installable) -->
-          ${state.deferredInstallPrompt ? `
+          <!-- Google Account / Profile Button -->
+          ${state.user ? `
             <button
-              id="header-pwa-install-btn"
-              class="px-2.5 sm:px-3 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs sm:text-sm font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Install Linguist AI to Home Screen / Desktop"
+              id="header-auth-btn"
+              class="p-1 pr-2.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-900 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+              title="Signed in as ${escapeHtml(state.user.email || state.user.displayName || 'User')} — Click to manage account"
             >
-              <span>📲</span>
-              <span class="hidden md:inline">Install</span>
+              ${state.user.photoURL ? `<img src="${escapeHtml(state.user.photoURL)}" alt="Profile" class="w-6 h-6 rounded-full object-cover" referrerpolicy="no-referrer" />` : `<span class="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">${escapeHtml((state.user.displayName || 'U')[0])}</span>`}
+              <span class="hidden md:inline max-w-[90px] truncate">${escapeHtml((state.user.displayName || state.user.email || 'Account').split(' ')[0])}</span>
             </button>
-          ` : ''}
+          ` : `
+            <button
+              id="header-google-signin-btn"
+              class="px-2.5 py-1.5 rounded-2xl bg-white hover:bg-gray-50 border border-gray-200 text-gray-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+              title="Sign in with Google to save progress and streaks"
+            >
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              <span class="hidden sm:inline">Sign In</span>
+            </button>
+          `}
 
           <!-- New Chat Button -->
           <button
             id="new-chat-btn"
-            class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs sm:text-sm font-semibold shadow-sm shadow-indigo-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
+            class="px-2.5 sm:px-3 py-1.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-semibold shadow-sm shadow-indigo-500/20 flex items-center gap-1 transition-all cursor-pointer"
             title="Start a new chat session"
           >
             <span>+</span>
@@ -1314,7 +1477,7 @@ function renderApp() {
         </div>
       </header>
 
-      <!-- Main Layout Body (History Sidebar + Chat Area + Breakdown Drawer) -->
+      <!-- Main Layout Body (History Sidebar + Home Dashboard OR Chat Area) -->
       <div class="flex-grow flex overflow-hidden relative">
 
         <!-- Historical Sessions Drawer -->
@@ -1422,9 +1585,33 @@ function renderApp() {
           </aside>
         ` : ''}
 
+        ${state.activeView === 'home' ? renderHomeScreen({
+          user: state.user,
+          isSyncingCloud: state.isSyncingCloud,
+          metrics: fluencyMetrics,
+          settings: state.userSettings,
+          activeSession: session,
+          sessions: state.sessions,
+          homeLanguageCategory: state.homeLanguageCategory
+        }) : `
         <!-- Chat Messages Historical Scroll Area -->
         <main id="chat-container" class="flex-grow overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-5 scroll-smooth">
           <div class="max-w-3xl mx-auto w-full space-y-4">
+            <!-- Quick Back to Home Dashboard Bar -->
+            <div class="flex items-center justify-between pb-1">
+              <button
+                id="chat-back-home-btn"
+                class="px-3 py-1.5 rounded-xl bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+              >
+                <span>←</span>
+                <span>Back to Home Dashboard</span>
+              </button>
+              <div class="flex items-center gap-2 text-xs text-gray-500">
+                <span>${lang.flag} <strong>${lang.name}</strong></span>
+                <span>·</span>
+                <span>${persona.avatar} <strong>${persona.name}</strong></span>
+              </div>
+            </div>
             
 
 
@@ -1887,9 +2074,11 @@ function renderApp() {
             </aside>
           `;
         })() : ''}
+        `}
 
       </div>
 
+      ${state.activeView === 'chat' ? `
       <!-- Dynamic Conversation Suggestions -->
       <div class="border-t border-gray-100 bg-white/95 backdrop-blur-md px-3 sm:px-6 py-2 shadow-2xs">
         <div class="max-w-3xl mx-auto flex items-center gap-2 overflow-x-auto scrollbar-none py-0.5">
@@ -2071,6 +2260,7 @@ function renderApp() {
 
         </div>
       </footer>
+      ` : ''}
 
       <!-- Language Switcher Modal -->
       ${state.showLanguageModal ? `
@@ -2721,6 +2911,14 @@ function renderApp() {
       <!-- App Icon & Brand Identity Modal -->
       ${state.showIconModal ? renderIconModal() : ''}
 
+      <!-- App Settings Modal (Gear Icon: Dark/Light Mode, Voices, Account) -->
+      ${state.showAppSettingsModal ? renderAppSettingsModal(
+        state.userSettings,
+        state.user,
+        typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis.getVoices() : [],
+        lang.code
+      ) : ''}
+
     </div>
   `;
 
@@ -2739,7 +2937,234 @@ function attachAppEventListeners() {
   const session = getActiveSession();
   if (!session) return;
 
-  // Header Actions
+  // Header Navigation Switcher (Home vs Learn)
+  document.getElementById('nav-home-btn')?.addEventListener('click', () => {
+    state.activeView = 'home';
+    renderApp();
+  });
+
+  document.getElementById('nav-chat-btn')?.addEventListener('click', () => {
+    state.activeView = 'chat';
+    renderApp();
+  });
+
+  document.getElementById('chat-back-home-btn')?.addEventListener('click', () => {
+    state.activeView = 'home';
+    renderApp();
+  });
+
+  // Header & Home Settings Gear Modal Triggers
+  const openAppSettings = () => {
+    state.showAppSettingsModal = true;
+    renderApp();
+  };
+
+  document.getElementById('header-app-settings-btn')?.addEventListener('click', openAppSettings);
+  document.getElementById('home-settings-gear-btn')?.addEventListener('click', openAppSettings);
+  document.getElementById('header-auth-btn')?.addEventListener('click', openAppSettings);
+
+  // Google Sign-In & Account Switch Handlers
+  const triggerGoogleLogin = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      console.warn('Google sign-in cancelled or failed:', err);
+    }
+  };
+
+  document.getElementById('header-google-signin-btn')?.addEventListener('click', triggerGoogleLogin);
+  document.getElementById('home-google-signin-btn')?.addEventListener('click', triggerGoogleLogin);
+  document.getElementById('home-switch-account-btn')?.addEventListener('click', triggerGoogleLogin);
+  document.getElementById('settings-google-signin-btn')?.addEventListener('click', triggerGoogleLogin);
+  document.getElementById('settings-switch-account-btn')?.addEventListener('click', triggerGoogleLogin);
+
+  document.getElementById('settings-signout-btn')?.addEventListener('click', async () => {
+    try {
+      await signOutUser();
+      state.showAppSettingsModal = false;
+      renderApp();
+    } catch (err) {
+      console.warn('Sign out failed:', err);
+    }
+  });
+
+  // Home Screen Action Handlers
+  document.getElementById('home-go-learn-btn')?.addEventListener('click', () => {
+    state.activeView = 'chat';
+    renderApp();
+  });
+
+  document.getElementById('home-new-session-btn')?.addEventListener('click', () => {
+    state.activeView = 'chat';
+    createNewChatSession();
+    renderApp();
+  });
+
+  document.getElementById('home-open-vocab-modal-btn')?.addEventListener('click', () => {
+    state.showFluencyModal = true;
+    state.activeFluencyTab = 'vocab';
+    renderApp();
+  });
+
+  document.getElementById('home-view-all-history-btn')?.addEventListener('click', () => {
+    state.showHistoryDrawer = true;
+    renderApp();
+  });
+
+  document.querySelectorAll('[data-home-lang-cat]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cat = btn.getAttribute('data-home-lang-cat') as LanguageCategory;
+      if (cat) {
+        state.homeLanguageCategory = cat;
+        renderApp();
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-home-select-lang]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const code = btn.getAttribute('data-home-select-lang');
+      const targetLang = LANGUAGES.find(l => l.code === code);
+      if (targetLang) {
+        createNewChatSession(targetLang, session.persona, session.difficulty, session.tone);
+        renderApp();
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-home-launch-persona]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pId = btn.getAttribute('data-home-launch-persona');
+      if (pId) {
+        const targetPersona = findPersonaById(pId);
+        state.activeView = 'chat';
+        createNewChatSession(
+          session.language,
+          targetPersona,
+          targetPersona.defaultDifficulty || 'intermediate',
+          targetPersona.defaultTone || 'formal'
+        );
+        renderApp();
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-home-resume-session]').forEach(card => {
+    card.addEventListener('click', () => {
+      const sId = card.getAttribute('data-home-resume-session');
+      if (sId) {
+        switchActiveSession(sId);
+      }
+    });
+  });
+
+  // App Settings Modal Controls (Dark/Light Mode, Voices, Rate, Pitch, Defaults)
+  const closeAppSettings = () => {
+    state.showAppSettingsModal = false;
+    renderApp();
+  };
+
+  document.getElementById('close-app-settings-btn')?.addEventListener('click', closeAppSettings);
+  document.getElementById('done-app-settings-btn')?.addEventListener('click', closeAppSettings);
+  document.getElementById('app-settings-backdrop')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      closeAppSettings();
+    }
+  });
+
+  const persistUserSettings = () => {
+    saveLocalSettings(state.userSettings);
+    if (state.user) {
+      syncUserProfileToCloud(state.user, fluencyMetrics, state.userSettings).catch(err => console.warn(err));
+    }
+  };
+
+  document.querySelectorAll('[data-settings-theme]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const theme = btn.getAttribute('data-settings-theme') as 'light' | 'dark' | 'system';
+      if (theme) {
+        state.userSettings.theme = theme;
+        applyThemeToDocument(theme);
+        persistUserSettings();
+        renderApp();
+      }
+    });
+  });
+
+  document.getElementById('settings-test-voice-btn')?.addEventListener('click', () => {
+    const sampleGreeting = getLocalizedGreeting(session.persona.id, session.language);
+    speak(sampleGreeting, session.language.code);
+  });
+
+  const voiceSelect = document.getElementById('settings-voice-select') as HTMLSelectElement | null;
+  if (voiceSelect) {
+    voiceSelect.addEventListener('change', (e) => {
+      state.userSettings.preferredVoiceURI = (e.target as HTMLSelectElement).value;
+      persistUserSettings();
+    });
+  }
+
+  const rateSlider = document.getElementById('settings-rate-slider') as HTMLInputElement | null;
+  if (rateSlider) {
+    rateSlider.addEventListener('input', (e) => {
+      const val = parseFloat((e.target as HTMLInputElement).value);
+      if (!Number.isNaN(val)) {
+        state.userSettings.speechRate = val;
+        const label = document.getElementById('settings-rate-label');
+        if (label) label.textContent = `${val.toFixed(2)}x`;
+        persistUserSettings();
+      }
+    });
+  }
+
+  const pitchSlider = document.getElementById('settings-pitch-slider') as HTMLInputElement | null;
+  if (pitchSlider) {
+    pitchSlider.addEventListener('input', (e) => {
+      const val = parseFloat((e.target as HTMLInputElement).value);
+      if (!Number.isNaN(val)) {
+        state.userSettings.speechPitch = val;
+        const label = document.getElementById('settings-pitch-label');
+        if (label) label.textContent = val.toFixed(2);
+        persistUserSettings();
+      }
+    });
+  }
+
+  document.getElementById('settings-autospeak-toggle')?.addEventListener('click', () => {
+    state.userSettings.autoSpeak = !state.userSettings.autoSpeak;
+    state.autoSpeak = state.userSettings.autoSpeak;
+    persistUserSettings();
+    renderApp();
+  });
+
+  const defaultLangSelect = document.getElementById('settings-default-lang') as HTMLSelectElement | null;
+  if (defaultLangSelect) {
+    defaultLangSelect.addEventListener('change', (e) => {
+      const code = (e.target as HTMLSelectElement).value;
+      state.userSettings.defaultLanguageCode = code;
+      persistUserSettings();
+      const targetLang = LANGUAGES.find(l => l.code === code);
+      if (targetLang) {
+        createNewChatSession(targetLang, session.persona, session.difficulty, session.tone);
+        renderApp();
+      }
+    });
+  }
+
+  const defaultPersonaSelect = document.getElementById('settings-default-persona') as HTMLSelectElement | null;
+  if (defaultPersonaSelect) {
+    defaultPersonaSelect.addEventListener('change', (e) => {
+      const pId = (e.target as HTMLSelectElement).value;
+      state.userSettings.defaultPersonaId = pId;
+      persistUserSettings();
+      const targetPersona = findPersonaById(pId);
+      if (targetPersona) {
+        createNewChatSession(session.language, targetPersona, targetPersona.defaultDifficulty, targetPersona.defaultTone);
+        renderApp();
+      }
+    });
+  }
+
   // Brand Icon & PWA Modal Handlers
   document.getElementById('brand-icon-btn')?.addEventListener('click', () => {
     state.showIconModal = true;
@@ -2822,16 +3247,20 @@ function attachAppEventListeners() {
 
   document.getElementById('toggle-speak-btn')?.addEventListener('click', () => {
     state.autoSpeak = !state.autoSpeak;
+    state.userSettings.autoSpeak = state.autoSpeak;
+    persistUserSettings();
     renderApp();
   });
 
   document.getElementById('new-chat-btn')?.addEventListener('click', () => {
+    state.activeView = 'chat';
     createNewChatSession();
     renderApp();
   });
 
   document.getElementById('drawer-new-chat-btn')?.addEventListener('click', () => {
     state.showHistoryDrawer = false;
+    state.activeView = 'chat';
     createNewChatSession();
     renderApp();
   });
@@ -2908,6 +3337,10 @@ function attachAppEventListeners() {
       const id = btn.getAttribute('data-vocab-toggle-mastered');
       if (id) {
         toggleVocabularyMastered(fluencyMetrics, id);
+        const updatedItem = fluencyMetrics.savedVocabulary.find(v => v.id === id);
+        if (state.user && updatedItem) {
+          saveCloudVocabularyItem(state.user.uid, updatedItem).catch(err => console.warn(err));
+        }
         renderApp();
       }
     });
@@ -2919,6 +3352,9 @@ function attachAppEventListeners() {
       const id = btn.getAttribute('data-vocab-delete');
       if (id) {
         removeVocabularyWord(fluencyMetrics, id);
+        if (state.user) {
+          deleteCloudVocabularyItem(state.user.uid, id).catch(err => console.warn(err));
+        }
         renderApp();
       }
     });
@@ -2941,6 +3377,9 @@ function attachAppEventListeners() {
     const item = fluencyMetrics.savedVocabulary[state.quizCardIndex % Math.max(1, fluencyMetrics.savedVocabulary.length)];
     if (item) {
       toggleVocabularyMastered(fluencyMetrics, item.id);
+      if (state.user) {
+        saveCloudVocabularyItem(state.user.uid, item).catch(err => console.warn(err));
+      }
       renderApp();
     }
   });
@@ -2998,7 +3437,7 @@ function attachAppEventListeners() {
       try {
         const token: WordToken = JSON.parse(tokenJson);
         const targetMsg = session.messages.find(m => m.id === state.activeBreakdownMsgId);
-        saveVocabularyWord(fluencyMetrics, {
+        const saved = saveVocabularyWord(fluencyMetrics, {
           word: token.surface,
           lemma: token.lemma,
           transliteration: token.transliteration,
@@ -3008,6 +3447,9 @@ function attachAppEventListeners() {
           partOfSpeech: token.partOfSpeech,
           contextSentence: targetMsg?.content
         });
+        if (state.user && saved.added) {
+          saveCloudVocabularyItem(state.user.uid, saved.item).catch(err => console.warn(err));
+        }
         renderApp();
       } catch (e) {
         console.warn('Failed to save token:', e);

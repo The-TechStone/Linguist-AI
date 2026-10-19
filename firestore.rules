@@ -1,0 +1,307 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function userProfileExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function sessionExists(userId, sessionId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/sessions/$(sessionId));
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'displayName', 'email', 'photoURL',
+        'currentStreakDays', 'longestStreakDays', 'lastActiveDate',
+        'totalMessagesSent', 'totalCorrectionsReceived', 'accurateMessagesCount',
+        'theme', 'speechRate', 'speechPitch', 'preferredVoiceURI', 'autoSpeak',
+        'defaultLanguageCode', 'defaultPersonaId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid', 'displayName', 'email', 'photoURL',
+        'currentStreakDays', 'longestStreakDays', 'lastActiveDate',
+        'totalMessagesSent', 'totalCorrectionsReceived', 'accurateMessagesCount',
+        'theme', 'speechRate', 'speechPitch', 'preferredVoiceURI', 'autoSpeak',
+        'defaultLanguageCode', 'defaultPersonaId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.uid == request.auth.uid && data.uid == userId &&
+      data.displayName is string && data.displayName.size() <= 120 &&
+      data.email is string && data.email.size() <= 200 &&
+      data.photoURL is string && data.photoURL.size() <= 1000 &&
+      data.currentStreakDays is number && data.currentStreakDays >= 0 && data.currentStreakDays <= 100000 &&
+      data.longestStreakDays is number && data.longestStreakDays >= 0 && data.longestStreakDays <= 100000 &&
+      data.lastActiveDate is string && data.lastActiveDate.size() <= 20 &&
+      data.totalMessagesSent is number && data.totalMessagesSent >= 0 && data.totalMessagesSent <= 10000000 &&
+      data.totalCorrectionsReceived is number && data.totalCorrectionsReceived >= 0 && data.totalCorrectionsReceived <= 10000000 &&
+      data.accurateMessagesCount is number && data.accurateMessagesCount >= 0 && data.accurateMessagesCount <= 10000000 &&
+      data.theme is string && data.theme.size() <= 20 && data.theme in ['light', 'dark', 'system'] &&
+      data.speechRate is number && data.speechRate >= 0.25 && data.speechRate <= 2.5 &&
+      data.speechPitch is number && data.speechPitch >= 0.25 && data.speechPitch <= 2.5 &&
+      data.preferredVoiceURI is string && data.preferredVoiceURI.size() <= 300 &&
+      data.autoSpeak is bool &&
+      data.defaultLanguageCode is string && data.defaultLanguageCode.size() <= 20 &&
+      data.defaultPersonaId is string && data.defaultPersonaId.size() <= 60 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    function isValidChatSessionMeta(data, userId, sessionId) {
+      return data.keys().hasAll([
+        'id', 'userId', 'title', 'languageCode', 'personaId',
+        'tone', 'difficulty', 'lastMessagePreview', 'messageCount',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'userId', 'title', 'languageCode', 'personaId',
+        'tone', 'difficulty', 'lastMessagePreview', 'messageCount',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') && data.id == sessionId &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.userId == request.auth.uid && data.userId == userId &&
+      data.title is string && data.title.size() <= 200 &&
+      data.languageCode is string && data.languageCode.size() <= 20 &&
+      data.personaId is string && data.personaId.size() <= 60 &&
+      data.tone is string && data.tone.size() <= 40 &&
+      data.difficulty is string && data.difficulty.size() <= 40 &&
+      data.lastMessagePreview is string && data.lastMessagePreview.size() <= 500 &&
+      data.messageCount is number && data.messageCount >= 0 && data.messageCount <= 100000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    function isValidChatMessageDoc(data, userId, sessionId, messageId) {
+      return data.keys().hasAll([
+        'id', 'sessionId', 'userId', 'role', 'content',
+        'transliteration', 'translation', 'isCorrect',
+        'correction', 'explanation', 'timestampMs', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'sessionId', 'userId', 'role', 'content',
+        'transliteration', 'translation', 'isCorrect',
+        'correction', 'explanation', 'timestampMs', 'createdAt'
+      ]) &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') && data.id == messageId &&
+      data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 && data.sessionId.matches('^[a-zA-Z0-9_\\-]+$') && data.sessionId == sessionId &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.userId == request.auth.uid && data.userId == userId &&
+      data.role is string && data.role.size() <= 20 && data.role in ['user', 'assistant'] &&
+      data.content is string && data.content.size() <= 4000 &&
+      data.transliteration is string && data.transliteration.size() <= 4000 &&
+      data.translation is string && data.translation.size() <= 4000 &&
+      data.isCorrect is bool &&
+      data.correction is string && data.correction.size() <= 4000 &&
+      data.explanation is string && data.explanation.size() <= 4000 &&
+      data.timestampMs is number && data.timestampMs >= 0 &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidVocabularyDoc(data, userId, vocabId) {
+      return data.keys().hasAll([
+        'id', 'userId', 'word', 'lemma', 'transliteration', 'translation',
+        'languageCode', 'languageName', 'partOfSpeech', 'contextSentence',
+        'mastered', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'userId', 'word', 'lemma', 'transliteration', 'translation',
+        'languageCode', 'languageName', 'partOfSpeech', 'contextSentence',
+        'mastered', 'createdAt', 'updatedAt'
+      ]) &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') && data.id == vocabId &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.userId == request.auth.uid && data.userId == userId &&
+      data.word is string && data.word.size() <= 200 &&
+      data.lemma is string && data.lemma.size() <= 200 &&
+      data.transliteration is string && data.transliteration.size() <= 300 &&
+      data.translation is string && data.translation.size() <= 500 &&
+      data.languageCode is string && data.languageCode.size() <= 20 &&
+      data.languageName is string && data.languageName.size() <= 80 &&
+      data.partOfSpeech is string && data.partOfSpeech.size() <= 60 &&
+      data.contextSentence is string && data.contextSentence.size() <= 1000 &&
+      data.mastered is bool &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    function isValidDailyActivityDoc(data, userId, dateKey) {
+      return data.keys().hasAll([
+        'dateKey', 'userId', 'messagesSent', 'wordsLearned', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'dateKey', 'userId', 'messagesSent', 'wordsLearned', 'createdAt', 'updatedAt'
+      ]) &&
+      data.dateKey is string && data.dateKey.size() >= 1 && data.dateKey.size() <= 20 && data.dateKey.matches('^[a-zA-Z0-9_\\-]+$') && data.dateKey == dateKey &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.userId == request.auth.uid && data.userId == userId &&
+      data.messagesSent is number && data.messagesSent >= 0 && data.messagesSent <= 100000 &&
+      data.wordsLearned is number && data.wordsLearned >= 0 && data.wordsLearned <= 100000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    // 4. Collection Rules
+
+    // UserProfile Document: /users/{userId}
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId) && existing().uid == request.auth.uid;
+      allow list: if false;
+
+      allow create: if isOwner(userId) && isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().createdAt == request.time;
+
+      allow update: if isOwner(userId) && isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          // Action 1: Update Profile, Streaks & Settings
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName', 'email', 'photoURL',
+            'currentStreakDays', 'longestStreakDays', 'lastActiveDate',
+            'totalMessagesSent', 'totalCorrectionsReceived', 'accurateMessagesCount',
+            'theme', 'speechRate', 'speechPitch', 'preferredVoiceURI', 'autoSpeak',
+            'defaultLanguageCode', 'defaultPersonaId', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isOwner(userId) && isValidId(userId) && existing().uid == request.auth.uid;
+
+      // Subcollection: /users/{userId}/sessions/{sessionId}
+      match /sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) && existing().userId == request.auth.uid;
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) &&
+          isValidChatSessionMeta(incoming(), userId, sessionId) &&
+          incoming().createdAt == request.time &&
+          userProfileExists(userId);
+
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) &&
+          isValidChatSessionMeta(incoming(), userId, sessionId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          userProfileExists(userId) &&
+          (
+            // Action: Update Session Metadata & Message Count
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'languageCode', 'personaId', 'tone', 'difficulty',
+              'lastMessagePreview', 'messageCount', 'updatedAt'
+            ])
+          );
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) && existing().userId == request.auth.uid;
+
+        // Subcollection: /users/{userId}/sessions/{sessionId}/messages/{messageId}
+        match /messages/{messageId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) && isValidId(messageId) && existing().userId == request.auth.uid;
+          allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+
+          allow create: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) && isValidId(messageId) &&
+            isValidChatMessageDoc(incoming(), userId, sessionId, messageId) &&
+            incoming().createdAt == request.time &&
+            sessionExists(userId, sessionId);
+
+          allow update: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) && isValidId(messageId) &&
+            isValidChatMessageDoc(incoming(), userId, sessionId, messageId) &&
+            incoming().id == existing().id &&
+            incoming().sessionId == existing().sessionId &&
+            incoming().userId == existing().userId &&
+            incoming().createdAt == existing().createdAt &&
+            sessionExists(userId, sessionId) &&
+            (
+              // Action: Update Grammar Feedback on Message
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'content', 'transliteration', 'translation',
+                'isCorrect', 'correction', 'explanation'
+              ])
+            );
+
+          allow delete: if isOwner(userId) && isValidId(userId) && isValidId(sessionId) && isValidId(messageId) && existing().userId == request.auth.uid;
+        }
+      }
+
+      // Subcollection: /users/{userId}/vocabulary/{vocabId}
+      match /vocabulary/{vocabId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(vocabId) && existing().userId == request.auth.uid;
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(vocabId) &&
+          isValidVocabularyDoc(incoming(), userId, vocabId) &&
+          incoming().createdAt == request.time &&
+          userProfileExists(userId);
+
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(vocabId) &&
+          isValidVocabularyDoc(incoming(), userId, vocabId) &&
+          incoming().id == existing().id &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          userProfileExists(userId) &&
+          (
+            // Action: Toggle Mastered or Update Notes
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'word', 'lemma', 'transliteration', 'translation',
+              'partOfSpeech', 'contextSentence', 'mastered', 'updatedAt'
+            ])
+          );
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(vocabId) && existing().userId == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/dailyActivity/{dateKey}
+      match /dailyActivity/{dateKey} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(dateKey) && existing().userId == request.auth.uid;
+        allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(dateKey) &&
+          isValidDailyActivityDoc(incoming(), userId, dateKey) &&
+          incoming().createdAt == request.time &&
+          userProfileExists(userId);
+
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(dateKey) &&
+          isValidDailyActivityDoc(incoming(), userId, dateKey) &&
+          incoming().dateKey == existing().dateKey &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          userProfileExists(userId) &&
+          (
+            // Action: Increment Daily Activity Counters
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'messagesSent', 'wordsLearned', 'updatedAt'
+            ])
+          );
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(dateKey) && existing().userId == request.auth.uid;
+      }
+    }
+  }
+}

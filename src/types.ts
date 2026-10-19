@@ -88,8 +88,15 @@ export type SavedVocabularyItem = {
   mastered: boolean;
 };
 
+export type DailyActivityEntry = {
+  date: string;
+  messagesSent: number;
+  wordsLearned: number;
+};
+
 export type FluencyMetrics = {
   currentStreakDays: number;
+  longestStreakDays: number;
   lastActiveDate: string; // YYYY-MM-DD
   activeDates: string[];  // Array of YYYY-MM-DD active days
   totalMessagesSent: number;
@@ -99,12 +106,16 @@ export type FluencyMetrics = {
   accuracyRate: number;   // 0 - 100 percentage
   savedVocabulary: SavedVocabularyItem[];
   personaUsageCount: Record<string, number>;
+  dailyActivity: Record<string, DailyActivityEntry>;
 };
+
+export type UserFluencyMetrics = FluencyMetrics;
 
 export type Message = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  transliteration?: string;
   translation?: string;
   correction?: string;
   explanation?: string;
